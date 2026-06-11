@@ -3,6 +3,7 @@ import cors from "cors";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.route.js";
 import cookieParser from "cookie-parser";
+import workspaceRoutes from "./routes/workspace.route.js";
 
 const app = express();
 
@@ -13,6 +14,7 @@ app.use(cookieParser());
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api/workspaces", workspaceRoutes);
 
 app.get("/", (req, res) => {
   res.json({
