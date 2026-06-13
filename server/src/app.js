@@ -4,6 +4,7 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.route.js";
 import cookieParser from "cookie-parser";
 import workspaceRoutes from "./routes/workspace.route.js";
+import fileRoutes from "./routes/file.route.js"
 
 const app = express();
 
@@ -15,6 +16,8 @@ app.use(express.json());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/workspaces", workspaceRoutes);
+app.use("/api/files", fileRoutes);
+
 
 app.get("/", (req, res) => {
   res.json({
