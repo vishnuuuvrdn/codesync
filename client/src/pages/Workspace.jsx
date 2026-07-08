@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import api from "../api/axios";
 import socket from "../socket/socket";
@@ -7,6 +7,7 @@ import CollaboratorsList from "../components/workspace/CollaboratorsList";
 import CreateItem from "../components/workspace/CreateItem";
 import FileTree from "../components/workspace/FileTree";
 import EditorPanel from "../components/workspace/EditorPanel";
+import OutputPanel from "../components/workspace/OutputPanel";
 
 function Workspace() {
   const { id } = useParams();
@@ -18,6 +19,19 @@ function Workspace() {
   const [code, setCode] = useState("");
   const [saving, setSaving] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [output, setOutput] = useState("");
+  const [isExecuting, setIsExecuting] = useState(false);
+
+  // Keep a ref to the latest activeFile so the socket listener (registered
+  // once) always sees the current file without forcing a reconnect.
+  const activeFileRef = useRef(activeFile);
+  useEffect(() => {
+    activeFileRef.current = activeFile;
+  }, [activeFile]);
+
+  // Skip the autosave that would otherwise fire the instant a file is opened
+  // (code changes because we just loaded it, not because the user edited it).
+  const skipNextAutosave = useRef(false);
 
   const fetchFiles = async () => {
     try {
@@ -43,6 +57,7 @@ function Workspace() {
     if (file.type === "folder") return;
     try {
       const res = await api.get(`/files/open/${file._id}`);
+      skipNextAutosave.current = true;
       setActiveFile(res.data.file);
       setCode(res.data.file.content);
     } catch (error) {
@@ -50,11 +65,52 @@ function Workspace() {
     }
   };
 
-  const saveFile = async () => {
+  const runCode = async () => {
     if (!activeFile) return;
+
+    try {
+      setIsExecuting(true);
+      setOutput("");
+
+      const languageMap = {
+        js: "javascript",
+        jsx: "javascript",
+        py: "python",
+        cpp: "cpp",
+        c: "c",
+        java: "java",
+      };
+
+      const extension = activeFile.name.split(".").pop()?.toLowerCase() || "";
+      const language = languageMap[extension];
+
+      if (!language) {
+        setOutput("Unsupported language.");
+        return;
+      }
+
+      const { data } = await api.post("/run", {
+        language,
+        code,
+      });
+
+      if (data.stderr) {
+        setOutput(data.stderr);
+      } else {
+        setOutput(data.stdout);
+      }
+    } catch (error) {
+      setOutput(error.response?.data?.message || "Failed to execute code.");
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const saveFile = async (fileId, content) => {
+    if (!fileId) return;
     setSaving(true);
     try {
-      await api.put(`/files/${activeFile._id}`, { content: code });
+      await api.put(`/files/${fileId}`, { content });
     } catch (error) {
       console.log(error);
     } finally {
@@ -74,15 +130,25 @@ function Workspace() {
 
   useEffect(() => {
     fetchFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Autosave, skipping the save that would fire right after opening a file.
   useEffect(() => {
     if (!activeFile) return;
-    const timer = setTimeout(() => saveFile(), 1000);
+    if (skipNextAutosave.current) {
+      skipNextAutosave.current = false;
+      return;
+    }
+    const timer = setTimeout(() => saveFile(activeFile._id, code), 1000);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
+  // Socket connects once per workspace, not on every file switch.
   useEffect(() => {
+    if (!currentUser) return;
+
     socket.connect();
 
     socket.emit("join-workspace", {
@@ -93,22 +159,26 @@ function Workspace() {
       },
     });
 
-    socket.on("receive-file-change", ({ fileId, content }) => {
-      if (!activeFile) return;
-      if (activeFile._id === fileId) setCode(content);
-    });
+    const handleReceiveFileChange = ({ fileId, content }) => {
+      const current = activeFileRef.current;
+      if (!current) return;
+      if (current._id === fileId) setCode(content);
+    };
 
-    socket.on("online-users", (users) => {
+    const handleOnlineUsers = (users) => {
       setOnlineUsers(users);
-    });
+    };
+
+    socket.on("receive-file-change", handleReceiveFileChange);
+    socket.on("online-users", handleOnlineUsers);
 
     return () => {
       socket.emit("leave-workspace", id);
-      socket.off("receive-file-change");
-      socket.off("online-users");
+      socket.off("receive-file-change", handleReceiveFileChange);
+      socket.off("online-users", handleOnlineUsers);
       socket.disconnect();
     };
-  }, [id, activeFile]);
+  }, [id, currentUser]);
 
   return (
     <div className="flex h-full bg-black text-white overflow-hidden">
@@ -120,14 +190,20 @@ function Workspace() {
       </div>
 
       {/* Editor */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <EditorPanel
-          activeFile={activeFile}
-          code={code}
-          saving={saving}
-          onCodeChange={handleCodeChange}
-          onSave={saveFile}
-        />
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <EditorPanel
+            activeFile={activeFile}
+            code={code}
+            saving={saving}
+            onCodeChange={handleCodeChange}
+            onSave={() => saveFile(activeFile?._id, code)}
+            onRun={runCode}
+            isExecuting={isExecuting}
+          />
+        </div>
+
+        <OutputPanel output={output} isExecuting={isExecuting} />
       </div>
     </div>
   );

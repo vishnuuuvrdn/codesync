@@ -1,6 +1,14 @@
 import Editor from "@monaco-editor/react";
 
-function EditorPanel({ activeFile, code, saving, onCodeChange, onSave }) {
+function EditorPanel({
+  activeFile,
+  code,
+  saving,
+  onCodeChange,
+  onSave,
+  onRun,
+  isExecuting,
+}) {
   const getLanguage = (filename) => {
     const ext = filename.split(".").pop();
     const map = {
@@ -18,7 +26,7 @@ function EditorPanel({ activeFile, code, saving, onCodeChange, onSave }) {
 
   if (!activeFile) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-2">
+      <div className="h-full flex flex-col items-center justify-center gap-2">
         <svg
           width="32"
           height="32"
@@ -45,7 +53,10 @@ function EditorPanel({ activeFile, code, saving, onCodeChange, onSave }) {
   }
 
   return (
-    <>
+    // h-full + flex-col + min-h-0 is what actually caps this panel's height.
+    // Without min-h-0, the Editor child below (height:100%) can force this
+    // column to grow past its allotted space and push the terminal offscreen.
+    <div className="h-full flex flex-col min-h-0">
       <div className="h-9 shrink-0 flex items-center justify-between px-4 border-b border-zinc-900 bg-zinc-950">
         <div className="flex items-center gap-2">
           <svg
@@ -70,32 +81,44 @@ function EditorPanel({ activeFile, code, saving, onCodeChange, onSave }) {
           </svg>
           <span className="text-zinc-400 text-xs">{activeFile.name}</span>
         </div>
-        <div className="flex items-center gap-3">
-          {saving && <span className="text-zinc-600 text-xs">saving…</span>}
+        <div className="flex items-center gap-4">
+          {saving && <span className="text-zinc-600 text-xs">saving...</span>}
           <button
             onClick={onSave}
             className="text-zinc-500 hover:text-white text-xs transition-colors cursor-pointer"
           >
             Save
           </button>
+          <button
+            onClick={onRun}
+            disabled={isExecuting}
+            className="px-3 py-1 rounded bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition cursor-pointer"
+          >
+            {isExecuting ? "Running..." : "▶ Run"}
+          </button>
         </div>
       </div>
-      <Editor
-        height="calc(100vh - 80px)"
-        language={getLanguage(activeFile.name)}
-        theme="vs-dark"
-        value={code}
-        onChange={(value = "") => onCodeChange(value)}
-        options={{
-          fontSize: 13,
-          fontFamily: "ui-monospace, Consolas, monospace",
-          minimap: { enabled: false },
-          scrollBeyondLastLine: false,
-          padding: { top: 16 },
-          lineNumbersMinChars: 3,
-        }}
-      />
-    </>
+
+      {/* flex-1 + min-h-0 gives Monaco a hard, scrollable box instead of
+          letting height:100% cascade past the available space. */}
+      <div className="flex-1 min-h-0">
+        <Editor
+          height="100%"
+          language={getLanguage(activeFile.name)}
+          theme="vs-dark"
+          value={code}
+          onChange={(value = "") => onCodeChange(value)}
+          options={{
+            fontSize: 13,
+            fontFamily: "ui-monospace, Consolas, monospace",
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            padding: { top: 16 },
+            lineNumbersMinChars: 3,
+          }}
+        />
+      </div>
+    </div>
   );
 }
 
