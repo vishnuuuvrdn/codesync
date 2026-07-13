@@ -8,6 +8,7 @@ import CreateItem from "../components/workspace/CreateItem";
 import FileTree from "../components/workspace/FileTree";
 import EditorPanel from "../components/workspace/EditorPanel";
 import OutputPanel from "../components/workspace/OutputPanel";
+import HistoryPanel from "../components/workspace/HistoryPanel";
 
 function Workspace() {
   const { id } = useParams();
@@ -22,6 +23,7 @@ function Workspace() {
   const [cursors, setCursors] = useState({});
   const [output, setOutput] = useState("");
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const activeFile = openFiles.find(f => f._id === activeFileId);
   const code = activeFile?.content || "";
@@ -31,8 +33,6 @@ function Workspace() {
     activeFileIdRef.current = activeFileId;
   }, [activeFileId]);
 
-  // Skip the autosave that would otherwise fire the instant a file is opened
-  // (code changes because we just loaded it, not because the user edited it).
   const skipNextAutosave = useRef(false);
 
   const fetchFiles = async () => {
@@ -292,11 +292,27 @@ function Workspace() {
             onCloseTab={closeTab}
             cursors={cursors}
             onCursorChange={handleCursorChange}
+            onToggleHistory={() => setIsHistoryOpen(prev => !prev)}
           />
         </div>
 
         <OutputPanel output={output} isExecuting={isExecuting} />
       </div>
+
+      {/* History Panel */}
+      {isHistoryOpen && activeFileId && (
+        <HistoryPanel 
+          fileId={activeFileId}
+          onClose={() => setIsHistoryOpen(false)}
+          onRestore={(content) => {
+            // Re-mount editor with restored content? The editor should react to the websocket broadcast or we trigger an update
+            // For now, we will let socket sync or reload take care of it, or dispatch a save event
+            // Best is to call updateFile directly or let the backend broadcast the change.
+            // Since `restoreVersion` updates DB, we should trigger a fetch or notify via socket.
+            socket.emit("file-update", { workspaceId: id, fileId: activeFileId, content });
+          }}
+        />
+      )}
     </div>
   );
 }
