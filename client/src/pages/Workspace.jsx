@@ -15,19 +15,20 @@ function Workspace() {
 
   const [files, setFiles] = useState([]);
   const [name, setName] = useState("");
-  const [activeFile, setActiveFile] = useState(null);
-  const [code, setCode] = useState("");
+  const [openFiles, setOpenFiles] = useState([]);
+  const [activeFileId, setActiveFileId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [output, setOutput] = useState("");
   const [isExecuting, setIsExecuting] = useState(false);
 
-  // Keep a ref to the latest activeFile so the socket listener (registered
-  // once) always sees the current file without forcing a reconnect.
-  const activeFileRef = useRef(activeFile);
+  const activeFile = openFiles.find(f => f._id === activeFileId);
+  const code = activeFile?.content || "";
+
+  const activeFileIdRef = useRef(activeFileId);
   useEffect(() => {
-    activeFileRef.current = activeFile;
-  }, [activeFile]);
+    activeFileIdRef.current = activeFileId;
+  }, [activeFileId]);
 
   // Skip the autosave that would otherwise fire the instant a file is opened
   // (code changes because we just loaded it, not because the user edited it).
@@ -55,13 +56,34 @@ function Workspace() {
 
   const openFile = async (file) => {
     if (file.type === "folder") return;
+    
+    if (openFiles.find(f => f._id === file._id)) {
+      skipNextAutosave.current = true;
+      setActiveFileId(file._id);
+      return;
+    }
+
     try {
       const res = await api.get(`/files/open/${file._id}`);
       skipNextAutosave.current = true;
-      setActiveFile(res.data.file);
-      setCode(res.data.file.content);
+      setOpenFiles(prev => [...prev, res.data.file]);
+      setActiveFileId(file._id);
     } catch (error) {
       console.log(error);
+    }
+  };
+
+  const closeTab = (fileId, e) => {
+    e?.stopPropagation();
+    setOpenFiles(prev => prev.filter(f => f._id !== fileId));
+    if (activeFileId === fileId) {
+      const remaining = openFiles.filter(f => f._id !== fileId);
+      if (remaining.length > 0) {
+        skipNextAutosave.current = true;
+        setActiveFileId(remaining[remaining.length - 1]._id);
+      } else {
+        setActiveFileId(null);
+      }
     }
   };
 
@@ -77,9 +99,10 @@ function Workspace() {
   const deleteItem = async (fileId) => {
     try {
       await api.delete(`/files/${fileId}`);
-      if (activeFile && activeFile._id === fileId) {
-        setActiveFile(null);
-        setCode("");
+      setOpenFiles(prev => prev.filter(f => f._id !== fileId));
+      if (activeFileId === fileId) {
+        const remaining = openFiles.filter(f => f._id !== fileId);
+        setActiveFileId(remaining.length > 0 ? remaining[remaining.length - 1]._id : null);
       }
       fetchFiles();
     } catch (error) {
@@ -141,11 +164,15 @@ function Workspace() {
   };
 
   const handleCodeChange = (value) => {
-    setCode(value);
-    if (!activeFile) return;
+    if (!activeFileId) return;
+    
+    setOpenFiles(prev => prev.map(f => 
+      f._id === activeFileId ? { ...f, content: value } : f
+    ));
+
     socket.emit("file-change", {
       workspaceId: id,
-      fileId: activeFile._id,
+      fileId: activeFileId,
       content: value,
     });
   };
@@ -157,12 +184,12 @@ function Workspace() {
 
   // Autosave, skipping the save that would fire right after opening a file.
   useEffect(() => {
-    if (!activeFile) return;
+    if (!activeFileId) return;
     if (skipNextAutosave.current) {
       skipNextAutosave.current = false;
       return;
     }
-    const timer = setTimeout(() => saveFile(activeFile._id, code), 1000);
+    const timer = setTimeout(() => saveFile(activeFileId, code), 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
@@ -182,9 +209,9 @@ function Workspace() {
     });
 
     const handleReceiveFileChange = ({ fileId, content }) => {
-      const current = activeFileRef.current;
-      if (!current) return;
-      if (current._id === fileId) setCode(content);
+      setOpenFiles(prev => prev.map(f => 
+        f._id === fileId ? { ...f, content } : f
+      ));
     };
 
     const handleOnlineUsers = (users) => {
@@ -221,13 +248,15 @@ function Workspace() {
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <div className="flex-1 min-h-0 overflow-hidden">
           <EditorPanel
-            activeFile={activeFile}
-            code={code}
+            openFiles={openFiles}
+            activeFileId={activeFileId}
             saving={saving}
             onCodeChange={handleCodeChange}
-            onSave={() => saveFile(activeFile?._id, code)}
+            onSave={() => saveFile(activeFileId, code)}
             onRun={runCode}
             isExecuting={isExecuting}
+            onTabClick={(id) => { skipNextAutosave.current = true; setActiveFileId(id); }}
+            onCloseTab={closeTab}
           />
         </div>
 
