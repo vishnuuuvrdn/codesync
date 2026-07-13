@@ -21,7 +21,7 @@ class FileService {
     const file = await File.create({
       name,
       type,
-      workspace: workspaceId,
+      workspace: workspaceId, // schema field is 'workspace'
       parent: parent || null,
     });
 
@@ -29,18 +29,20 @@ class FileService {
   }
 
   async getFiles(workspaceId) {
-    const files = await File.find({
-      workspace: workspaceId,
-    });
+    const files = await File.find({ workspace: workspaceId });
     return files;
   }
 
-  async getFileContent(fileId) {
+  async getFileContent(fileId, userId) {
     const file = await File.findById(fileId);
     if (!file) {
       const error = new Error("File not found");
       error.status = 404;
       throw error;
+    }
+    // Verify the requesting user has access to this file's workspace
+    if (userId) {
+      await this.verifyWorkspacePermission(file.workspace, userId);
     }
     return file;
   }
@@ -88,11 +90,9 @@ class FileService {
     await this.verifyWorkspacePermission(file.workspace, userId);
 
     if (file.type === "folder") {
-      // Fetch all files in the workspace to build the subtree
       const allFiles = await File.find({ workspace: file.workspace });
       const idsToDelete = [fileId];
 
-      // Recursively find all children
       const addChildren = (parentId) => {
         const children = allFiles.filter(
           (f) => f.parent && f.parent.toString() === parentId.toString()
@@ -104,13 +104,89 @@ class FileService {
       };
 
       addChildren(fileId);
-
       await File.deleteMany({ _id: { $in: idsToDelete } });
       return idsToDelete;
     } else {
       await File.deleteOne({ _id: fileId });
       return [fileId];
     }
+  }
+
+  async moveFile(fileId, newParentId, userId) {
+    const file = await File.findById(fileId);
+    if (!file) throw new Error("File not found");
+
+    await this.verifyWorkspacePermission(file.workspace, userId);
+
+    if (newParentId) {
+      // Verify the target folder belongs to the same workspace
+      const parent = await File.findOne({
+        _id: newParentId,
+        workspace: file.workspace,
+        type: "folder",
+      });
+      if (!parent) throw new Error("Invalid parent folder");
+
+      // Prevent moving a folder into itself or its children
+      if (file.type === "folder") {
+        let currentParent = parent;
+        while (currentParent) {
+          if (currentParent._id.toString() === file._id.toString()) {
+            throw new Error("Cannot move a folder into itself");
+          }
+          if (currentParent.parent) {
+            currentParent = await File.findById(currentParent.parent);
+          } else {
+            break;
+          }
+        }
+      }
+    }
+
+    file.parent = newParentId || null;
+    await file.save();
+    return file;
+  }
+
+  async duplicateFile(fileId, userId) {
+    const file = await File.findById(fileId);
+    if (!file) throw new Error("File not found");
+
+    await this.verifyWorkspacePermission(file.workspace, userId);
+
+    // Use the correct schema field 'workspace', not 'workspaceId'
+    const newFile = new File({
+      workspace: file.workspace,
+      name: `${file.name} (copy)`,
+      type: file.type,
+      parent: file.parent,
+      content: file.content,
+    });
+
+    await newFile.save();
+
+    // If it's a folder, recursively duplicate children
+    if (file.type === "folder") {
+      const duplicateChildren = async (oldParentId, newParentId) => {
+        const children = await File.find({ parent: oldParentId });
+        for (const child of children) {
+          const newChild = new File({
+            workspace: child.workspace,
+            name: child.name,
+            type: child.type,
+            parent: newParentId,
+            content: child.content,
+          });
+          await newChild.save();
+          if (child.type === "folder") {
+            await duplicateChildren(child._id, newChild._id);
+          }
+        }
+      };
+      await duplicateChildren(file._id, newFile._id);
+    }
+
+    return newFile;
   }
 }
 

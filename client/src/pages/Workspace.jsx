@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import api from "../api/axios";
 import socket from "../socket/socket";
 import { useAuth } from "../context/AuthContext";
@@ -8,140 +9,152 @@ import CreateItem from "../components/workspace/CreateItem";
 import FileTree from "../components/workspace/FileTree";
 import EditorPanel from "../components/workspace/EditorPanel";
 import OutputPanel from "../components/workspace/OutputPanel";
+import TerminalPanel from "../components/workspace/TerminalPanel";
+import { WorkspaceSessionProvider, useWorkspaceSession } from "../contexts/WorkspaceSessionContext";
 
-function Workspace() {
+function WorkspaceContent() {
   const { id } = useParams();
   const { currentUser } = useAuth();
 
   const [files, setFiles] = useState([]);
   const [name, setName] = useState("");
-  const [openFiles, setOpenFiles] = useState([]);
-  const [activeFileId, setActiveFileId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [cursors, setCursors] = useState({});
   const [output, setOutput] = useState("");
   const [isExecuting, setIsExecuting] = useState(false);
+  const [bottomTab, setBottomTab] = useState("terminal");
 
-  const activeFile = openFiles.find(f => f._id === activeFileId);
+  const {
+    openFiles,
+    activeFileId,
+    openFile,
+    closeFile,
+    updateFileContent,
+    markClean,
+    syncDeletedFiles,
+  } = useWorkspaceSession();
+
+  const activeFile = openFiles.find((f) => f._id === activeFileId);
   const code = activeFile?.content || "";
 
-  const activeFileIdRef = useRef(activeFileId);
+  // Refs to provide stable references inside socket callbacks
+  const fetchFilesRef = useRef(null);
+  const syncDeletedFilesRef = useRef(syncDeletedFiles);
+  const updateFileContentRef = useRef(updateFileContent);
+
   useEffect(() => {
-    activeFileIdRef.current = activeFileId;
-  }, [activeFileId]);
+    syncDeletedFilesRef.current = syncDeletedFiles;
+  }, [syncDeletedFiles]);
 
-  const skipNextAutosave = useRef(false);
+  useEffect(() => {
+    updateFileContentRef.current = updateFileContent;
+  }, [updateFileContent]);
 
-  const fetchFiles = async () => {
+  const fetchFiles = useCallback(async () => {
     try {
       const res = await api.get(`/files/${id}`);
       setFiles(res.data.files);
     } catch (error) {
-      console.log(error);
+      console.error("fetchFiles error:", error);
     }
-  };
+  }, [id]);
+
+  // Keep ref stable for socket listeners
+  useEffect(() => {
+    fetchFilesRef.current = fetchFiles;
+  }, [fetchFiles]);
 
   const createItem = async (type) => {
     if (!name.trim()) return;
     try {
       await api.post("/files", { name, type, workspaceId: id });
       setName("");
+      // Don't call fetchFiles — rely on socket file-created event for real-time sync.
+      // But fetch as fallback for self since socket won't fire on same sender.
       fetchFiles();
     } catch (error) {
-      console.log(error);
-    }
-  };
-
-  const openFile = async (file) => {
-    if (file.type === "folder") return;
-    
-    if (openFiles.find(f => f._id === file._id)) {
-      skipNextAutosave.current = true;
-      setActiveFileId(file._id);
-      return;
-    }
-
-    try {
-      const res = await api.get(`/files/open/${file._id}`);
-      skipNextAutosave.current = true;
-      setOpenFiles(prev => [...prev, res.data.file]);
-      setActiveFileId(file._id);
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
-  const closeTab = (fileId, e) => {
-    e?.stopPropagation();
-    setOpenFiles(prev => prev.filter(f => f._id !== fileId));
-    if (activeFileId === fileId) {
-      const remaining = openFiles.filter(f => f._id !== fileId);
-      if (remaining.length > 0) {
-        skipNextAutosave.current = true;
-        setActiveFileId(remaining[remaining.length - 1]._id);
-      } else {
-        setActiveFileId(null);
-      }
+      console.error("createItem error:", error);
     }
   };
 
   const renameItem = async (fileId, newName) => {
     try {
       await api.put(`/files/rename/${fileId}`, { name: newName });
-      fetchFiles();
+      // Rely on socket file-renamed event for sync, but update local state immediately too
+      setFiles((prev) =>
+        prev.map((f) => (f._id === fileId ? { ...f, name: newName } : f))
+      );
     } catch (error) {
-      console.log(error);
+      console.error("renameItem error:", error);
     }
   };
 
   const deleteItem = async (fileId) => {
     try {
       await api.delete(`/files/${fileId}`);
-      setOpenFiles(prev => prev.filter(f => f._id !== fileId));
-      if (activeFileId === fileId) {
-        const remaining = openFiles.filter(f => f._id !== fileId);
-        setActiveFileId(remaining.length > 0 ? remaining[remaining.length - 1]._id : null);
-      }
-      fetchFiles();
+      // Optimistic local update before socket confirms
+      setFiles((prev) => prev.filter((f) => f._id !== fileId));
+      syncDeletedFiles([fileId]);
     } catch (error) {
-      console.log(error);
+      console.error("deleteItem error:", error);
     }
+  };
+
+  const duplicateItem = async (fileId) => {
+    try {
+      await api.post(`/files/${fileId}/duplicate`);
+      // Socket file-duplicated event will trigger fetchFiles
+    } catch (error) {
+      console.error("duplicateItem error:", error);
+    }
+  };
+
+  const moveItem = async (fileId, newParentId) => {
+    try {
+      await api.put(`/files/${fileId}/move`, { parentId: newParentId });
+      // Socket file-moved event will update local state
+    } catch (error) {
+      console.error("moveItem error:", error);
+    }
+  };
+
+  const closeTab = (fileId) => {
+    closeFile(fileId);
   };
 
   const runCode = async () => {
     if (!activeFile) return;
 
+    const languageMap = {
+      js: "javascript",
+      jsx: "javascript",
+      py: "python",
+      cpp: "cpp",
+      c: "c",
+      java: "java",
+    };
+
+    const extension = activeFile.name.split(".").pop()?.toLowerCase() || "";
+    const language = languageMap[extension];
+
+    if (!language) {
+      setOutput(`Unsupported file type: .${extension}`);
+      setBottomTab("output");
+      return;
+    }
+
     try {
+      setBottomTab("output");
       setIsExecuting(true);
       setOutput("");
 
-      const languageMap = {
-        js: "javascript",
-        jsx: "javascript",
-        py: "python",
-        cpp: "cpp",
-        c: "c",
-        java: "java",
-      };
-
-      const extension = activeFile.name.split(".").pop()?.toLowerCase() || "";
-      const language = languageMap[extension];
-
-      if (!language) {
-        setOutput("Unsupported language.");
-        return;
-      }
-
-      const { data } = await api.post("/run", {
-        language,
-        code,
-      });
+      const { data } = await api.post("/run", { language, code });
 
       if (data.stderr) {
         setOutput(data.stderr);
       } else {
-        setOutput(data.stdout);
+        setOutput(data.stdout || "(no output)");
       }
     } catch (error) {
       setOutput(error.response?.data?.message || "Failed to execute code.");
@@ -150,30 +163,32 @@ function Workspace() {
     }
   };
 
-  const saveFile = async (fileId, content) => {
+  // Use ref to capture current code for saveFile — avoids stale closure
+  const codeRef = useRef(code);
+  useEffect(() => {
+    codeRef.current = code;
+  }, [code]);
+
+  const saveFile = async (fileId) => {
     if (!fileId) return;
     setSaving(true);
     try {
-      await api.put(`/files/${fileId}`, { content });
+      await api.put(`/files/${fileId}`, { content: codeRef.current });
+      markClean(fileId);
     } catch (error) {
-      console.log(error);
+      console.error("saveFile error:", error);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleCodeChange = (value) => {
+  const handleCodeChange = (newContent) => {
     if (!activeFileId) return;
-    
-    setOpenFiles(prev => prev.map(f => 
-      f._id === activeFileId ? { ...f, content: value } : f
-    ));
-
-    socket.emit("file-change", {
-      workspaceId: id,
-      fileId: activeFileId,
-      content: value,
-    });
+    setFiles((prev) =>
+      prev.map((f) => (f._id === activeFileId ? { ...f, content: newContent } : f))
+    );
+    updateFileContent(activeFileId, newContent);
+    socket.emit("file-update", { workspaceId: id, fileId: activeFileId, content: newContent });
   };
 
   const handleCursorChange = (position) => {
@@ -182,31 +197,15 @@ function Workspace() {
       workspaceId: id,
       fileId: activeFileId,
       position,
-      user: {
-        id: currentUser._id,
-        username: currentUser.username,
-      },
+      user: { id: currentUser._id, username: currentUser.username },
     });
   };
 
   useEffect(() => {
     fetchFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchFiles]);
 
-  // Autosave, skipping the save that would fire right after opening a file.
-  useEffect(() => {
-    if (!activeFileId) return;
-    if (skipNextAutosave.current) {
-      skipNextAutosave.current = false;
-      return;
-    }
-    const timer = setTimeout(() => saveFile(activeFileId, code), 1000);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]);
-
-  // Socket connects once per workspace, not on every file switch.
+  // Socket lifecycle: connect when user is available, disconnect on unmount
   useEffect(() => {
     if (!currentUser) return;
 
@@ -214,17 +213,8 @@ function Workspace() {
 
     socket.emit("join-workspace", {
       workspaceId: id,
-      user: {
-        id: currentUser._id,
-        username: currentUser.username,
-      },
+      user: { id: currentUser._id, username: currentUser.username },
     });
-
-    const handleReceiveFileChange = ({ fileId, content }) => {
-      setOpenFiles(prev => prev.map(f => 
-        f._id === fileId ? { ...f, content } : f
-      ));
-    };
 
     const handleReceiveCursorMove = ({ fileId, position, user }) => {
       setCursors((prev) => ({
@@ -235,25 +225,63 @@ function Workspace() {
 
     const handleOnlineUsers = (users) => {
       setOnlineUsers(users);
-      // Clean up cursors of users who left
       setCursors((prev) => {
         const next = { ...prev };
         Object.keys(next).forEach((uid) => {
-          if (!users.find(u => u.id === uid)) {
-            delete next[uid];
-          }
+          if (!users.find((u) => u.id === uid)) delete next[uid];
         });
         return next;
       });
     };
 
-    socket.on("receive-file-change", handleReceiveFileChange);
+    const handleFileUpdated = ({ fileId, content }) => {
+      setFiles((prev) => prev.map((f) => (f._id === fileId ? { ...f, content } : f)));
+      updateFileContentRef.current(fileId, content);
+    };
+
+    const handleFileCreated = (file) => {
+      setFiles((prev) => {
+        // Avoid duplicate entries
+        if (prev.find((f) => f._id === file._id)) return prev;
+        return [...prev, file];
+      });
+    };
+
+    const handleFileRenamed = (file) => {
+      setFiles((prev) => prev.map((f) => (f._id === file._id ? { ...f, name: file.name } : f)));
+    };
+
+    const handleFileDeleted = (fileId) => {
+      setFiles((prev) => prev.filter((f) => f._id !== fileId));
+      syncDeletedFilesRef.current([fileId]);
+    };
+
+    const handleFileMoved = (file) => {
+      setFiles((prev) => prev.map((f) => (f._id === file._id ? file : f)));
+    };
+
+    const handleFileDuplicated = () => {
+      // Refetch all files to get the complete duplicated subtree
+      fetchFilesRef.current?.();
+    };
+
+    socket.on("file-updated", handleFileUpdated);
+    socket.on("file-created", handleFileCreated);
+    socket.on("file-renamed", handleFileRenamed);
+    socket.on("file-deleted", handleFileDeleted);
+    socket.on("file-moved", handleFileMoved);
+    socket.on("file-duplicated", handleFileDuplicated);
     socket.on("receive-cursor-move", handleReceiveCursorMove);
     socket.on("online-users", handleOnlineUsers);
 
     return () => {
       socket.emit("leave-workspace", id);
-      socket.off("receive-file-change", handleReceiveFileChange);
+      socket.off("file-updated", handleFileUpdated);
+      socket.off("file-created", handleFileCreated);
+      socket.off("file-renamed", handleFileRenamed);
+      socket.off("file-deleted", handleFileDeleted);
+      socket.off("file-moved", handleFileMoved);
+      socket.off("file-duplicated", handleFileDuplicated);
       socket.off("receive-cursor-move", handleReceiveCursorMove);
       socket.off("online-users", handleOnlineUsers);
       socket.disconnect();
@@ -262,41 +290,94 @@ function Workspace() {
 
   return (
     <div className="flex h-full bg-black text-white overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-56 shrink-0 flex flex-col border-r border-zinc-900 bg-zinc-950">
-        <CollaboratorsList onlineUsers={onlineUsers} />
-        <CreateItem name={name} setName={setName} createItem={createItem} />
-        <FileTree
-          files={files}
-          activeFile={activeFile}
-          onOpenFile={openFile}
-          onRenameItem={renameItem}
-          onDeleteItem={deleteItem}
-        />
-      </div>
-
-      {/* Editor */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <EditorPanel
-            openFiles={openFiles}
-            activeFileId={activeFileId}
-            saving={saving}
-            onCodeChange={handleCodeChange}
-            onSave={() => saveFile(activeFileId, code)}
-            onRun={runCode}
-            isExecuting={isExecuting}
-            onTabClick={(id) => { skipNextAutosave.current = true; setActiveFileId(id); }}
-            onCloseTab={closeTab}
-            cursors={cursors}
-            onCursorChange={handleCursorChange}
+      <PanelGroup direction="horizontal">
+        <Panel
+          defaultSize={20}
+          minSize={15}
+          maxSize={40}
+          className="flex flex-col border-r border-zinc-900 bg-zinc-950"
+        >
+          <CollaboratorsList onlineUsers={onlineUsers} />
+          <CreateItem name={name} setName={setName} createItem={createItem} />
+          <FileTree
+            files={files}
+            activeFile={activeFile}
+            onOpenFile={openFile}
+            onRenameItem={renameItem}
+            onDeleteItem={deleteItem}
+            onDuplicateItem={duplicateItem}
+            onMoveItem={moveItem}
           />
-        </div>
+        </Panel>
 
-        <OutputPanel output={output} isExecuting={isExecuting} />
-      </div>
+        <PanelResizeHandle className="w-1 bg-zinc-900 hover:bg-blue-500 transition-colors cursor-col-resize" />
+
+        <Panel defaultSize={80} className="flex flex-col min-w-0 min-h-0">
+          <PanelGroup direction="vertical">
+            <Panel defaultSize={70} className="flex-1 min-h-0 overflow-hidden">
+              <EditorPanel
+                activeFile={activeFile}
+                files={files}
+                onCodeChange={handleCodeChange}
+                onSave={saveFile}
+                onRun={runCode}
+                saving={saving}
+                openFiles={openFiles}
+                activeFileId={activeFileId}
+                onTabClick={(tabId) => {
+                  const file = openFiles.find((f) => f._id === tabId);
+                  if (file) openFile(file);
+                }}
+                onCloseTab={closeTab}
+                cursors={cursors}
+                onCursorChange={handleCursorChange}
+              />
+            </Panel>
+
+            <PanelResizeHandle className="h-1 bg-zinc-900 hover:bg-blue-500 transition-colors cursor-row-resize" />
+
+            <Panel defaultSize={30} className="flex flex-col min-h-0">
+              <div className="flex bg-zinc-950 border-b border-zinc-900 px-2 shrink-0">
+                <button
+                  onClick={() => setBottomTab("terminal")}
+                  className={`px-4 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                    bottomTab === "terminal"
+                      ? "border-blue-500 text-zinc-100"
+                      : "border-transparent text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  Terminal
+                </button>
+                <button
+                  onClick={() => setBottomTab("output")}
+                  className={`px-4 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                    bottomTab === "output"
+                      ? "border-blue-500 text-zinc-100"
+                      : "border-transparent text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  Output
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 bg-black overflow-hidden">
+                {bottomTab === "terminal" && <TerminalPanel />}
+                {bottomTab === "output" && (
+                  <OutputPanel output={output} isExecuting={isExecuting} />
+                )}
+              </div>
+            </Panel>
+          </PanelGroup>
+        </Panel>
+      </PanelGroup>
     </div>
   );
 }
 
-export default Workspace;
+export default function Workspace() {
+  const { id } = useParams();
+  return (
+    <WorkspaceSessionProvider workspaceId={id}>
+      <WorkspaceContent />
+    </WorkspaceSessionProvider>
+  );
+}

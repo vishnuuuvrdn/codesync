@@ -1,4 +1,7 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { DndContext, useDraggable, useDroppable, closestCenter } from "@dnd-kit/core";
+import { File, Folder, FolderOpen, Search, ChevronsUpDown, ChevronsDownUp } from "lucide-react";
+import { useWorkspaceSession } from "../../contexts/WorkspaceSessionContext";
 
 const FileNode = ({ 
   node, 
@@ -10,7 +13,8 @@ const FileNode = ({
   setRenamingNodeId, 
   onRenameItem 
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const { expandedFolders, toggleFolder } = useWorkspaceSession();
+  const isExpanded = !!expandedFolders[node._id];
   const isFolder = node.type === "folder";
   const isActive = activeFile?._id === node._id;
   const isRenaming = renamingNodeId === node._id;
@@ -27,7 +31,7 @@ const FileNode = ({
 
   const handleToggle = (e) => {
     e.stopPropagation();
-    setIsExpanded((prev) => !prev);
+    toggleFolder(node._id);
   };
 
   const handleClick = (e) => {
@@ -60,79 +64,64 @@ const FileNode = ({
     }
   };
 
+  const { attributes, listeners, setNodeRef: setDraggableRef, isDragging } = useDraggable({
+    id: node._id,
+    data: node,
+  });
+
+  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+    id: isFolder ? node._id : "none",
+    data: node,
+    disabled: !isFolder,
+  });
+
+  const setRefs = (element) => {
+    setDraggableRef(element);
+    if (isFolder) setDroppableRef(element);
+  };
+
   return (
     <div>
       <div
+        ref={setRefs}
+        {...attributes}
+        {...listeners}
         onClick={handleClick}
         onContextMenu={handleRightClick}
-        className={`flex items-center gap-1.5 py-1.5 text-xs cursor-pointer transition-colors
-          ${isActive ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900"}
+        className={`flex items-center gap-1.5 py-1 text-xs cursor-pointer transition-colors select-none
+          ${isActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"}
+          ${isDragging ? "opacity-50" : "opacity-100"}
+          ${isOver ? "bg-zinc-700 outline outline-1 outline-accent" : ""}
         `}
-        style={{ paddingLeft: `${1 + depth * 1}rem`, paddingRight: '1rem' }}
+        style={{ paddingLeft: `${0.5 + depth * 0.8}rem`, paddingRight: '0.5rem' }}
       >
-        {isFolder ? (
-          <span
-            onClick={handleToggle}
-            className={`shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""} text-zinc-600 hover:text-zinc-400`}
-            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "16px", height: "16px" }}
-          >
+        <div 
+          onClick={isFolder ? handleToggle : undefined} 
+          className="shrink-0 flex items-center justify-center w-4 h-4"
+        >
+          {isFolder ? (
             <svg
               width="10"
               height="10"
               viewBox="0 0 16 16"
               fill="none"
-              className="shrink-0"
+              className={`shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""} text-zinc-500`}
             >
-              <path
-                d="M5.5 3L10.5 8L5.5 13"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <path d="M5.5 3L10.5 8L5.5 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-          </span>
-        ) : (
-          <span style={{ width: "16px", display: "inline-block" }} />
-        )}
+          ) : null}
+        </div>
         
         {isFolder ? (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 16 16"
-            fill="none"
-            className="shrink-0 text-zinc-600"
-          >
-            <path
-              d="M1.5 3.5A1 1 0 012.5 2.5h3l1.5 2h6a1 1 0 011 1v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinejoin="round"
-            />
-          </svg>
+          isExpanded ? (
+            <FolderOpen size={14} className="shrink-0 text-accent" />
+          ) : (
+            <Folder size={14} className="shrink-0 text-accent" />
+          )
         ) : (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 16 16"
-            fill="none"
-            className="shrink-0 text-zinc-600"
-          >
-            <path
-              d="M4 2h5.5L12 4.5V14H4V2z"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M9 2v3h3"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <File size={14} className="shrink-0 text-zinc-500" />
         )}
+
         {isRenaming ? (
           <input
             ref={inputRef}
@@ -144,7 +133,7 @@ const FileNode = ({
             className="bg-zinc-900 border border-zinc-700 text-white text-xs rounded px-1 outline-none w-full"
           />
         ) : (
-          <span className="truncate select-none">{node.name}</span>
+          <span className="truncate">{node.name}</span>
         )}
       </div>
       
@@ -169,9 +158,36 @@ const FileNode = ({
   );
 };
 
-function FileTree({ files, activeFile, onOpenFile, onRenameItem, onDeleteItem }) {
+export default function FileTree({ 
+  files, 
+  activeFile, 
+  onOpenFile, 
+  onRenameItem, 
+  onDeleteItem, 
+  onDuplicateItem, 
+  onMoveItem 
+}) {
   const [contextMenu, setContextMenu] = useState(null);
   const [renamingNodeId, setRenamingNodeId] = useState(null);
+  const [search, setSearch] = useState("");
+  const { setExpandedFolders, expandedFolders, activeFileId } = useWorkspaceSession();
+
+  // Auto-reveal active file
+  useEffect(() => {
+    if (activeFileId) {
+      const activeNode = files.find(f => f._id === activeFileId);
+      if (activeNode) {
+        const parentsToExpand = {};
+        let currentParent = activeNode.parent;
+        while (currentParent) {
+          parentsToExpand[currentParent] = true;
+          const parentNode = files.find(f => f._id === currentParent);
+          currentParent = parentNode ? parentNode.parent : null;
+        }
+        setExpandedFolders(prev => ({ ...prev, ...parentsToExpand }));
+      }
+    }
+  }, [activeFileId, files, setExpandedFolders]);
 
   useEffect(() => {
     const handleClickOutside = () => setContextMenu(null);
@@ -180,31 +196,41 @@ function FileTree({ files, activeFile, onOpenFile, onRenameItem, onDeleteItem })
   }, []);
 
   const handleContextMenu = (e, node) => {
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      node,
-    });
+    setContextMenu({ x: e.clientX, y: e.clientY, node });
   };
 
   const handleRenameClick = () => {
-    if (contextMenu?.node) {
-      setRenamingNodeId(contextMenu.node._id);
-    }
+    if (contextMenu?.node) setRenamingNodeId(contextMenu.node._id);
     setContextMenu(null);
   };
 
   const handleDeleteClick = () => {
-    if (contextMenu?.node) {
-      onDeleteItem(contextMenu.node._id);
+    if (contextMenu?.node) onDeleteItem(contextMenu.node._id);
+    setContextMenu(null);
+  };
+
+  const handleDuplicateClick = () => {
+    if (contextMenu?.node && onDuplicateItem) {
+      onDuplicateItem(contextMenu.node._id);
     }
     setContextMenu(null);
   };
 
-  // Build tree structure from flat array
+  // Build filtered tree structure
   const fileTree = useMemo(() => {
     const map = {};
     const roots = [];
+
+    // Filter logic
+    const filteredFiles = search 
+      ? files.filter(f => f.name.toLowerCase().includes(search.toLowerCase()))
+      : files;
+
+    // If searching, show as flat list or resolve parents. For simplicity, if searching, just flat list matching nodes (if we want them in tree, we have to include parents)
+    if (search) {
+      // Just return sorted flat list of matches for search
+      return filteredFiles.sort((a, b) => a.name.localeCompare(b.name)).map(f => ({...f, children: []}));
+    }
 
     files.forEach((file) => {
       map[file._id] = { ...file, children: [] };
@@ -225,57 +251,101 @@ function FileTree({ files, activeFile, onOpenFile, onRenameItem, onDeleteItem })
         return a.name.localeCompare(b.name);
       });
       nodes.forEach((node) => {
-        if (node.children.length > 0) {
-          sortNodes(node.children);
-        }
+        if (node.children.length > 0) sortNodes(node.children);
       });
     };
 
     sortNodes(roots);
     return roots;
-  }, [files]);
+  }, [files, search]);
+
+  const expandAll = () => {
+    const allFolders = {};
+    files.filter(f => f.type === "folder").forEach(f => allFolders[f._id] = true);
+    setExpandedFolders(allFolders);
+  };
+
+  const collapseAll = () => {
+    setExpandedFolders({});
+  };
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const draggedNodeId = active.id;
+      const targetFolderId = over.id === "root" ? null : over.id;
+      
+      const draggedFile = files.find(f => f._id === draggedNodeId);
+      if (draggedFile && draggedFile.parent !== targetFolderId) {
+        if (onMoveItem) onMoveItem(draggedNodeId, targetFolderId);
+      }
+    }
+  };
+
+  // Droppable root for dropping back to root level
+  const { setNodeRef: setRootDroppable, isOver: isRootOver } = useDroppable({
+    id: "root",
+  });
 
   return (
-    <div className="flex-1 overflow-y-auto py-2 relative">
-      {fileTree.length === 0 ? (
-        <p className="text-zinc-700 text-xs px-4 py-3">No files yet.</p>
-      ) : (
-        fileTree.map((node) => (
-          <FileNode
-            key={node._id}
-            node={node}
-            activeFile={activeFile}
-            onOpenFile={onOpenFile}
-            onContextMenu={handleContextMenu}
-            renamingNodeId={renamingNodeId}
-            setRenamingNodeId={setRenamingNodeId}
-            onRenameItem={onRenameItem}
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="px-3 py-2 flex gap-2 shrink-0 border-b border-zinc-900 items-center justify-between">
+        <div className="relative flex-1">
+          <Search size={12} className="absolute left-2 top-1.5 text-zinc-500" />
+          <input 
+            type="text" 
+            placeholder="Search files..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-zinc-900 text-white text-xs rounded pl-6 pr-2 py-1 outline-none border border-zinc-800 focus:border-zinc-700"
           />
-        ))
-      )}
+        </div>
+        <div className="flex gap-1">
+          <button onClick={expandAll} className="p-1 text-zinc-500 hover:text-white rounded hover:bg-zinc-800" title="Expand All">
+            <ChevronsUpDown size={14} />
+          </button>
+          <button onClick={collapseAll} className="p-1 text-zinc-500 hover:text-white rounded hover:bg-zinc-800" title="Collapse All">
+            <ChevronsDownUp size={14} />
+          </button>
+        </div>
+      </div>
+
+      <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <div 
+          ref={setRootDroppable}
+          className={`flex-1 overflow-y-auto py-2 relative custom-scrollbar ${isRootOver ? "bg-zinc-900/50" : ""}`}
+        >
+          {fileTree.length === 0 ? (
+            <p className="text-zinc-700 text-xs px-4 py-3">No files yet.</p>
+          ) : (
+            fileTree.map((node) => (
+              <FileNode
+                key={node._id}
+                node={node}
+                activeFile={activeFile}
+                onOpenFile={onOpenFile}
+                onContextMenu={handleContextMenu}
+                renamingNodeId={renamingNodeId}
+                setRenamingNodeId={setRenamingNodeId}
+                onRenameItem={onRenameItem}
+              />
+            ))
+          )}
+        </div>
+      </DndContext>
 
       {contextMenu && (
         <div
-          className="fixed bg-zinc-800 border border-zinc-700 rounded-md shadow-xl py-1 z-50 text-xs text-zinc-300 min-w-[120px]"
+          className="fixed bg-zinc-800 border border-zinc-700 rounded shadow-xl py-1 z-50 text-xs text-zinc-200 min-w-[140px]"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            onClick={handleRenameClick}
-            className="w-full text-left px-3 py-1.5 hover:bg-zinc-700 hover:text-white transition-colors"
-          >
-            Rename
-          </button>
-          <button
-            onClick={handleDeleteClick}
-            className="w-full text-left px-3 py-1.5 hover:bg-zinc-700 text-red-400 hover:text-red-300 transition-colors"
-          >
-            Delete
-          </button>
+          <button onClick={handleRenameClick} className="w-full text-left px-3 py-1.5 hover:bg-accent hover:text-white transition-colors">Rename</button>
+          <button onClick={handleDuplicateClick} className="w-full text-left px-3 py-1.5 hover:bg-accent hover:text-white transition-colors">Duplicate</button>
+          <div className="h-px bg-zinc-700 my-1 mx-2"></div>
+          <button onClick={handleDeleteClick} className="w-full text-left px-3 py-1.5 hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors">Delete</button>
         </div>
       )}
     </div>
   );
 }
-
-export default FileTree;

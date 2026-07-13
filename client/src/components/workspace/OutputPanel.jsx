@@ -3,27 +3,25 @@ function OutputPanel({ output, isExecuting }) {
     output &&
     (output.includes("Error") ||
       output.includes("Exception") ||
-      output.includes("ReferenceError") ||
-      output.includes("SyntaxError"));
+      output.includes("Traceback") ||
+      output.includes("error:") ||
+      output.includes("fatal:"));
 
   return (
-    <div className="h-52 border-t border-zinc-800 bg-zinc-950 flex flex-col">
-      <div className="h-10 px-4 border-b border-zinc-800 flex items-center justify-between">
-        <span className="text-sm text-zinc-300 font-medium">Terminal</span>
-
+    <div className="h-full flex flex-col bg-zinc-950">
+      <div className="h-8 px-4 border-b border-zinc-900 flex items-center justify-between shrink-0">
+        <span className="text-xs text-zinc-400 font-medium">Output</span>
         {isExecuting && (
-          <span className="text-yellow-400 text-xs animate-pulse">
-            Running...
-          </span>
+          <span className="text-yellow-400 text-xs animate-pulse">Running…</span>
         )}
       </div>
 
-      <div className="flex-1 overflow-auto p-4 font-mono text-sm">
+      <div className="flex-1 overflow-auto p-4 font-mono text-xs min-h-0">
         {!output ? (
-          <span className="text-zinc-500">Click Run to execute your code.</span>
+          <span className="text-zinc-600">Click ▶ Run to execute your code.</span>
         ) : (
           <pre
-            className={`whitespace-pre-wrap ${
+            className={`whitespace-pre-wrap break-words leading-relaxed ${
               hasError ? "text-red-400" : "text-green-400"
             }`}
           >

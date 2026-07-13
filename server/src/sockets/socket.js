@@ -1,3 +1,5 @@
+import terminalService from "../services/terminal.service.js";
+
 const workspaceUsers = {};
 
 const initializeSocket = (io) => {
@@ -39,11 +41,8 @@ const initializeSocket = (io) => {
       io.to(workspaceId).emit("online-users", workspaceUsers[workspaceId]);
     });
 
-    socket.on("file-change", ({ workspaceId, fileId, content }) => {
-      socket.to(workspaceId).emit("receive-file-change", {
-        fileId,
-        content,
-      });
+    socket.on("file-update", ({ workspaceId, fileId, content }) => {
+      socket.to(workspaceId).emit("file-updated", { fileId, content });
     });
 
     socket.on("cursor-move", ({ workspaceId, fileId, position, user }) => {
@@ -54,7 +53,33 @@ const initializeSocket = (io) => {
       });
     });
 
+    socket.on("terminal-start", ({ sessionId }) => {
+      if (!sessionId) return;
+      // Track which terminal sessions belong to this socket
+      if (!socket.terminalSessions) socket.terminalSessions = new Set();
+      socket.terminalSessions.add(sessionId);
+
+      terminalService.createSession(
+        sessionId,
+        (data) => socket.emit("terminal-data", { sessionId, data }),
+        (code) => socket.emit("terminal-exit", { sessionId, code })
+      );
+    });
+
+    socket.on("terminal-input", ({ sessionId, data }) => {
+      terminalService.write(sessionId, data);
+    });
+
+    socket.on("terminal-resize", ({ sessionId, cols, rows }) => {
+      terminalService.resize(sessionId, cols, rows);
+    });
+
+    socket.on("terminal-kill", ({ sessionId }) => {
+      terminalService.killSession(sessionId);
+    });
+
     socket.on("disconnect", () => {
+      // Clean up workspace presence
       if (socket.workspaceId && socket.user) {
         workspaceUsers[socket.workspaceId] = (
           workspaceUsers[socket.workspaceId] || []
@@ -62,8 +87,15 @@ const initializeSocket = (io) => {
 
         io.to(socket.workspaceId).emit(
           "online-users",
-          workspaceUsers[socket.workspaceId],
+          workspaceUsers[socket.workspaceId]
         );
+      }
+
+      // Clean up any terminal sessions owned by this socket
+      if (socket.terminalSessions) {
+        for (const sessionId of socket.terminalSessions) {
+          terminalService.killSession(sessionId);
+        }
       }
 
       console.log(`User Disconnected: ${socket.id}`);
