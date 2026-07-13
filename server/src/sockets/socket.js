@@ -46,6 +46,14 @@ const initializeSocket = (io) => {
       });
     });
 
+    socket.on("cursor-move", ({ workspaceId, fileId, position, user }) => {
+      socket.to(workspaceId).emit("receive-cursor-move", {
+        fileId,
+        position,
+        user,
+      });
+    });
+
     socket.on("disconnect", () => {
       if (socket.workspaceId && socket.user) {
         workspaceUsers[socket.workspaceId] = (

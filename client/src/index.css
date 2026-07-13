@@ -44,3 +44,9 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+.remote-cursor {
+  border-left: 2px solid var(--color-accent);
+  position: absolute;
+  z-index: 10;
+}

@@ -19,6 +19,7 @@ function Workspace() {
   const [activeFileId, setActiveFileId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [cursors, setCursors] = useState({});
   const [output, setOutput] = useState("");
   const [isExecuting, setIsExecuting] = useState(false);
 
@@ -177,6 +178,19 @@ function Workspace() {
     });
   };
 
+  const handleCursorChange = (position) => {
+    if (!activeFileId || !currentUser) return;
+    socket.emit("cursor-move", {
+      workspaceId: id,
+      fileId: activeFileId,
+      position,
+      user: {
+        id: currentUser._id,
+        username: currentUser.username,
+      },
+    });
+  };
+
   useEffect(() => {
     fetchFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -214,16 +228,35 @@ function Workspace() {
       ));
     };
 
+    const handleReceiveCursorMove = ({ fileId, position, user }) => {
+      setCursors((prev) => ({
+        ...prev,
+        [user.id]: { fileId, position, user },
+      }));
+    };
+
     const handleOnlineUsers = (users) => {
       setOnlineUsers(users);
+      // Clean up cursors of users who left
+      setCursors((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((uid) => {
+          if (!users.find(u => u.id === uid)) {
+            delete next[uid];
+          }
+        });
+        return next;
+      });
     };
 
     socket.on("receive-file-change", handleReceiveFileChange);
+    socket.on("receive-cursor-move", handleReceiveCursorMove);
     socket.on("online-users", handleOnlineUsers);
 
     return () => {
       socket.emit("leave-workspace", id);
       socket.off("receive-file-change", handleReceiveFileChange);
+      socket.off("receive-cursor-move", handleReceiveCursorMove);
       socket.off("online-users", handleOnlineUsers);
       socket.disconnect();
     };
@@ -257,6 +290,8 @@ function Workspace() {
             isExecuting={isExecuting}
             onTabClick={(id) => { skipNextAutosave.current = true; setActiveFileId(id); }}
             onCloseTab={closeTab}
+            cursors={cursors}
+            onCursorChange={handleCursorChange}
           />
         </div>
 

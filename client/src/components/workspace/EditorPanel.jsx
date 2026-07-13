@@ -1,4 +1,5 @@
-import Editor from "@monaco-editor/react";
+import { useState, useRef, useEffect } from "react";
+import Editor, { useMonaco } from "@monaco-editor/react";
 
 function EditorPanel({
   openFiles,
@@ -10,7 +11,13 @@ function EditorPanel({
   isExecuting,
   onTabClick,
   onCloseTab,
+  cursors = {},
+  onCursorChange,
 }) {
+  const monaco = useMonaco();
+  const [editorInstance, setEditorInstance] = useState(null);
+  const decorationsCollectionRef = useRef(null);
+
   const activeFile = openFiles.find(f => f._id === activeFileId);
   const code = activeFile?.content || "";
 
@@ -28,6 +35,39 @@ function EditorPanel({
     };
     return map[ext] || "text";
   };
+
+  const handleEditorMount = (editor, monacoInstance) => {
+    setEditorInstance(editor);
+    decorationsCollectionRef.current = editor.createDecorationsCollection();
+
+    editor.onDidChangeCursorPosition((e) => {
+      if (onCursorChange) {
+        onCursorChange(e.position);
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!editorInstance || !decorationsCollectionRef.current || !monaco) return;
+    
+    const decorations = Object.values(cursors)
+      .filter((c) => c.fileId === activeFileId)
+      .map((c) => ({
+        range: new monaco.Range(
+          c.position.lineNumber, 
+          c.position.column, 
+          c.position.lineNumber, 
+          c.position.column
+        ),
+        options: {
+          className: "remote-cursor",
+          hoverMessage: { value: c.user.username },
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        }
+      }));
+      
+    decorationsCollectionRef.current.set(decorations);
+  }, [cursors, activeFileId, editorInstance, monaco]);
 
   if (openFiles.length === 0 || !activeFile) {
     return (
@@ -130,6 +170,7 @@ function EditorPanel({
           theme="vs-dark"
           value={code}
           onChange={(value = "") => onCodeChange(value)}
+          onMount={handleEditorMount}
           options={{
             fontSize: 13,
             fontFamily: "ui-monospace, Consolas, monospace",
