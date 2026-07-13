@@ -1,6 +1,5 @@
 import File from "../models/file.model.js";
 import Workspace from "../models/workspace.model.js";
-import historyService from "./history.service.js";
 
 class FileService {
   async verifyWorkspacePermission(workspaceId, userId) {
@@ -58,8 +57,6 @@ class FileService {
 
     file.content = content;
     await file.save();
-
-    await historyService.createSnapshot(file._id, content, userId, "Auto-save");
 
     return file;
   }

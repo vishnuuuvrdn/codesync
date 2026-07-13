@@ -13,7 +13,6 @@ function EditorPanel({
   onCloseTab,
   cursors = {},
   onCursorChange,
-  onToggleHistory,
 }) {
   const monaco = useMonaco();
   const [editorInstance, setEditorInstance] = useState(null);
@@ -147,17 +146,6 @@ function EditorPanel({
         
         <div className="flex items-center gap-4 px-4 shrink-0 bg-zinc-950">
           {saving && <span className="text-zinc-600 text-xs">saving...</span>}
-          <button
-            onClick={onToggleHistory}
-            className="text-zinc-500 hover:text-accent transition-colors cursor-pointer flex items-center gap-1 text-xs"
-            title="Toggle Version History"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
-            History
-          </button>
           <button
             onClick={onSave}
             className="text-zinc-500 hover:text-white text-xs transition-colors cursor-pointer"
