@@ -65,6 +65,28 @@ function Workspace() {
     }
   };
 
+  const renameItem = async (fileId, newName) => {
+    try {
+      await api.put(`/files/rename/${fileId}`, { name: newName });
+      fetchFiles();
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  const deleteItem = async (fileId) => {
+    try {
+      await api.delete(`/files/${fileId}`);
+      if (activeFile && activeFile._id === fileId) {
+        setActiveFile(null);
+        setCode("");
+      }
+      fetchFiles();
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   const runCode = async () => {
     if (!activeFile) return;
 
@@ -186,7 +208,13 @@ function Workspace() {
       <div className="w-56 shrink-0 flex flex-col border-r border-zinc-900 bg-zinc-950">
         <CollaboratorsList onlineUsers={onlineUsers} />
         <CreateItem name={name} setName={setName} createItem={createItem} />
-        <FileTree files={files} activeFile={activeFile} onOpenFile={openFile} />
+        <FileTree
+          files={files}
+          activeFile={activeFile}
+          onOpenFile={openFile}
+          onRenameItem={renameItem}
+          onDeleteItem={deleteItem}
+        />
       </div>
 
       {/* Editor */}

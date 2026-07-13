@@ -1,9 +1,29 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 
-const FileNode = ({ node, activeFile, onOpenFile, depth = 0 }) => {
+const FileNode = ({ 
+  node, 
+  activeFile, 
+  onOpenFile, 
+  depth = 0, 
+  onContextMenu, 
+  renamingNodeId, 
+  setRenamingNodeId, 
+  onRenameItem 
+}) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const isFolder = node.type === "folder";
   const isActive = activeFile?._id === node._id;
+  const isRenaming = renamingNodeId === node._id;
+  
+  const [editName, setEditName] = useState(node.name);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (isRenaming) {
+      setEditName(node.name);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [isRenaming, node.name]);
 
   const handleToggle = (e) => {
     e.stopPropagation();
@@ -19,10 +39,32 @@ const FileNode = ({ node, activeFile, onOpenFile, depth = 0 }) => {
     }
   };
 
+  const handleRightClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu(e, node);
+  };
+
+  const submitRename = () => {
+    if (editName.trim() && editName !== node.name) {
+      onRenameItem(node._id, editName.trim());
+    }
+    setRenamingNodeId(null);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      submitRename();
+    } else if (e.key === "Escape") {
+      setRenamingNodeId(null);
+    }
+  };
+
   return (
     <div>
       <div
         onClick={handleClick}
+        onContextMenu={handleRightClick}
         className={`flex items-center gap-1.5 py-1.5 text-xs cursor-pointer transition-colors
           ${isActive ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900"}
         `}
@@ -91,7 +133,19 @@ const FileNode = ({ node, activeFile, onOpenFile, depth = 0 }) => {
             />
           </svg>
         )}
-        <span className="truncate select-none">{node.name}</span>
+        {isRenaming ? (
+          <input
+            ref={inputRef}
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            onBlur={submitRename}
+            onKeyDown={handleKeyDown}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-zinc-900 border border-zinc-700 text-white text-xs rounded px-1 outline-none w-full"
+          />
+        ) : (
+          <span className="truncate select-none">{node.name}</span>
+        )}
       </div>
       
       {isFolder && isExpanded && node.children && (
@@ -103,6 +157,10 @@ const FileNode = ({ node, activeFile, onOpenFile, depth = 0 }) => {
               activeFile={activeFile}
               onOpenFile={onOpenFile}
               depth={depth + 1}
+              onContextMenu={onContextMenu}
+              renamingNodeId={renamingNodeId}
+              setRenamingNodeId={setRenamingNodeId}
+              onRenameItem={onRenameItem}
             />
           ))}
         </div>
@@ -111,18 +169,47 @@ const FileNode = ({ node, activeFile, onOpenFile, depth = 0 }) => {
   );
 };
 
-function FileTree({ files, activeFile, onOpenFile }) {
+function FileTree({ files, activeFile, onOpenFile, onRenameItem, onDeleteItem }) {
+  const [contextMenu, setContextMenu] = useState(null);
+  const [renamingNodeId, setRenamingNodeId] = useState(null);
+
+  useEffect(() => {
+    const handleClickOutside = () => setContextMenu(null);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+
+  const handleContextMenu = (e, node) => {
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      node,
+    });
+  };
+
+  const handleRenameClick = () => {
+    if (contextMenu?.node) {
+      setRenamingNodeId(contextMenu.node._id);
+    }
+    setContextMenu(null);
+  };
+
+  const handleDeleteClick = () => {
+    if (contextMenu?.node) {
+      onDeleteItem(contextMenu.node._id);
+    }
+    setContextMenu(null);
+  };
+
   // Build tree structure from flat array
   const fileTree = useMemo(() => {
     const map = {};
     const roots = [];
 
-    // Initialize map
     files.forEach((file) => {
       map[file._id] = { ...file, children: [] };
     });
 
-    // Build hierarchy
     files.forEach((file) => {
       if (file.parent && map[file.parent]) {
         map[file.parent].children.push(map[file._id]);
@@ -131,7 +218,6 @@ function FileTree({ files, activeFile, onOpenFile }) {
       }
     });
 
-    // Sort: Folders first, then files alphabetically
     const sortNodes = (nodes) => {
       nodes.sort((a, b) => {
         if (a.type === "folder" && b.type === "file") return -1;
@@ -150,7 +236,7 @@ function FileTree({ files, activeFile, onOpenFile }) {
   }, [files]);
 
   return (
-    <div className="flex-1 overflow-y-auto py-2">
+    <div className="flex-1 overflow-y-auto py-2 relative">
       {fileTree.length === 0 ? (
         <p className="text-zinc-700 text-xs px-4 py-3">No files yet.</p>
       ) : (
@@ -160,8 +246,33 @@ function FileTree({ files, activeFile, onOpenFile }) {
             node={node}
             activeFile={activeFile}
             onOpenFile={onOpenFile}
+            onContextMenu={handleContextMenu}
+            renamingNodeId={renamingNodeId}
+            setRenamingNodeId={setRenamingNodeId}
+            onRenameItem={onRenameItem}
           />
         ))
+      )}
+
+      {contextMenu && (
+        <div
+          className="fixed bg-zinc-800 border border-zinc-700 rounded-md shadow-xl py-1 z-50 text-xs text-zinc-300 min-w-[120px]"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={handleRenameClick}
+            className="w-full text-left px-3 py-1.5 hover:bg-zinc-700 hover:text-white transition-colors"
+          >
+            Rename
+          </button>
+          <button
+            onClick={handleDeleteClick}
+            className="w-full text-left px-3 py-1.5 hover:bg-zinc-700 text-red-400 hover:text-red-300 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
       )}
     </div>
   );
