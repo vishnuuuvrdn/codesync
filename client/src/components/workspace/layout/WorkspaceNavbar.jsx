@@ -53,7 +53,7 @@ export default function WorkspaceNavbar({
         <div className="flex items-center">
           {onlineUsers.slice(0, 5).map((user, i) => (
             <div
-              key={user.id}
+              key={user.socketId || user.id || i}
               className="w-6 h-6 rounded-full bg-zinc-800 border border-black flex items-center justify-center text-[10px] font-bold text-white -ml-2 first:ml-0"
               title={user.username}
             >

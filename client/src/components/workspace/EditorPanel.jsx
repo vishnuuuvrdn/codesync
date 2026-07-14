@@ -125,7 +125,8 @@ function EditorPanel({
       .filter((c) => c.fileId === activeFileId)
       .flatMap((c) => {
         let hash = 0;
-        for (let i = 0; i < c.user.id.length; i++) hash = (hash << 5) - hash + c.user.id.charCodeAt(i);
+        const userId = c.user?.socketId || c.user?.id || c.user?.username || 'unknown';
+        for (let i = 0; i < userId.length; i++) hash = (hash << 5) - hash + userId.charCodeAt(i);
         const colorIndex = Math.abs(hash) % 7;
         
         const isSelection = c.selection && 

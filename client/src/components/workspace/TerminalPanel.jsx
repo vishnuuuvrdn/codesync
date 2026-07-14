@@ -167,7 +167,12 @@ function TerminalInstance({ sessionId, isActive, isVisible }) {
     socket.on("terminal-exit", handleTerminalExit);
 
     const doFit = () => {
-      if (fitAddonRef.current && containerRef.current?.clientWidth > 0) {
+      if (
+        fitAddonRef.current && 
+        containerRef.current?.clientWidth > 0 &&
+        containerRef.current?.clientHeight > 0 &&
+        containerRef.current?.offsetParent !== null
+      ) {
         try {
           fitAddonRef.current.fit();
           socket.emit("terminal-resize", {

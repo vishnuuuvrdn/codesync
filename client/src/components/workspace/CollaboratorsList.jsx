@@ -20,8 +20,8 @@ function CollaboratorsList({ onlineUsers, onInviteClick }) {
         <p className="text-xs text-zinc-700">No one online</p>
       ) : (
         <div className="flex flex-col gap-1 min-w-0">
-          {onlineUsers.map((user) => (
-            <div key={user.id} className="flex items-center gap-2 py-0.5 min-w-0">
+          {onlineUsers.map((user, i) => (
+            <div key={user.socketId || user.id || i} className="flex items-center gap-2 py-0.5 min-w-0">
               <div className="relative shrink-0">
                 <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px] font-semibold text-zinc-300 uppercase">
                   {user.username.charAt(0)}
