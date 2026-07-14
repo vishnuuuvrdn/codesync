@@ -10,6 +10,8 @@ import FileTree from "../components/workspace/FileTree";
 import EditorPanel from "../components/workspace/EditorPanel";
 import OutputPanel from "../components/workspace/OutputPanel";
 import TerminalPanel from "../components/workspace/TerminalPanel";
+import InviteModal from "../components/workspace/InviteModal";
+import WorkspaceLayout from "../components/workspace/layout/WorkspaceLayout";
 import { WorkspaceSessionProvider, useWorkspaceSession } from "../contexts/WorkspaceSessionContext";
 
 function WorkspaceContent() {
@@ -24,6 +26,7 @@ function WorkspaceContent() {
   const [output, setOutput] = useState("");
   const [isExecuting, setIsExecuting] = useState(false);
   const [bottomTab, setBottomTab] = useState("terminal");
+  const [showInviteModal, setShowInviteModal] = useState(false);
 
   const {
     openFiles,
@@ -37,11 +40,16 @@ function WorkspaceContent() {
 
   const activeFile = openFiles.find((f) => f._id === activeFileId);
   const code = activeFile?.content || "";
+  const typingTimeoutRef = useRef(null);
 
-  // Refs to provide stable references inside socket callbacks
   const fetchFilesRef = useRef(null);
   const syncDeletedFilesRef = useRef(syncDeletedFiles);
   const updateFileContentRef = useRef(updateFileContent);
+  const openFilesRef = useRef(openFiles);
+
+  useEffect(() => {
+    openFilesRef.current = openFiles;
+  }, [openFiles]);
 
   useEffect(() => {
     syncDeletedFilesRef.current = syncDeletedFiles;
@@ -189,6 +197,13 @@ function WorkspaceContent() {
     );
     updateFileContent(activeFileId, newContent);
     socket.emit("file-update", { workspaceId: id, fileId: activeFileId, content: newContent });
+    
+    // Typing indicator logic
+    socket.emit("presence-update", { workspaceId: id, status: "typing" });
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit("presence-update", { workspaceId: id, status: "online" });
+    }, 2000);
   };
 
   const handleCursorChange = (position) => {
@@ -208,6 +223,20 @@ function WorkspaceContent() {
   // Socket lifecycle: connect when user is available, disconnect on unmount
   useEffect(() => {
     if (!currentUser) return;
+
+    // Handle Idle status
+    let idleTimeout;
+    const resetIdle = () => {
+      if (idleTimeout) clearTimeout(idleTimeout);
+      socket.emit("presence-update", { workspaceId: id, status: "online" });
+      idleTimeout = setTimeout(() => {
+        socket.emit("presence-update", { workspaceId: id, status: "idle" });
+      }, 60000); // 1 minute of no mouse/keyboard = idle
+    };
+
+    window.addEventListener("mousemove", resetIdle);
+    window.addEventListener("keydown", resetIdle);
+    resetIdle();
 
     socket.connect();
 
@@ -265,6 +294,17 @@ function WorkspaceContent() {
       fetchFilesRef.current?.();
     };
 
+    const handlePeerJoined = ({ user }) => {
+      // Sync unsaved changes to the newly joined peer
+      if (openFilesRef.current.length > 0) {
+        openFilesRef.current.forEach(file => {
+          if (file.isDirty) {
+            socket.emit("file-update", { workspaceId: id, fileId: file._id, content: file.content });
+          }
+        });
+      }
+    };
+
     socket.on("file-updated", handleFileUpdated);
     socket.on("file-created", handleFileCreated);
     socket.on("file-renamed", handleFileRenamed);
@@ -273,6 +313,7 @@ function WorkspaceContent() {
     socket.on("file-duplicated", handleFileDuplicated);
     socket.on("receive-cursor-move", handleReceiveCursorMove);
     socket.on("online-users", handleOnlineUsers);
+    socket.on("peer-joined", handlePeerJoined);
 
     return () => {
       socket.emit("leave-workspace", id);
@@ -284,92 +325,43 @@ function WorkspaceContent() {
       socket.off("file-duplicated", handleFileDuplicated);
       socket.off("receive-cursor-move", handleReceiveCursorMove);
       socket.off("online-users", handleOnlineUsers);
+      socket.off("peer-joined", handlePeerJoined);
       socket.disconnect();
+      window.removeEventListener("mousemove", resetIdle);
+      if (idleTimeout) clearTimeout(idleTimeout);
     };
   }, [id, currentUser]);
 
   return (
-    <div className="flex h-full bg-black text-white overflow-hidden">
-      <PanelGroup direction="horizontal">
-        <Panel
-          defaultSize={20}
-          minSize={15}
-          maxSize={40}
-          className="flex flex-col border-r border-zinc-900 bg-zinc-950"
-        >
-          <CollaboratorsList onlineUsers={onlineUsers} />
-          <CreateItem name={name} setName={setName} createItem={createItem} />
-          <FileTree
-            files={files}
-            activeFile={activeFile}
-            onOpenFile={openFile}
-            onRenameItem={renameItem}
-            onDeleteItem={deleteItem}
-            onDuplicateItem={duplicateItem}
-            onMoveItem={moveItem}
-          />
-        </Panel>
-
-        <PanelResizeHandle className="w-1 bg-zinc-900 hover:bg-blue-500 transition-colors cursor-col-resize" />
-
-        <Panel defaultSize={80} className="flex flex-col min-w-0 min-h-0">
-          <PanelGroup direction="vertical">
-            <Panel defaultSize={70} className="flex-1 min-h-0 overflow-hidden">
-              <EditorPanel
-                activeFile={activeFile}
-                files={files}
-                onCodeChange={handleCodeChange}
-                onSave={saveFile}
-                onRun={runCode}
-                saving={saving}
-                openFiles={openFiles}
-                activeFileId={activeFileId}
-                onTabClick={(tabId) => {
-                  const file = openFiles.find((f) => f._id === tabId);
-                  if (file) openFile(file);
-                }}
-                onCloseTab={closeTab}
-                cursors={cursors}
-                onCursorChange={handleCursorChange}
-              />
-            </Panel>
-
-            <PanelResizeHandle className="h-1 bg-zinc-900 hover:bg-blue-500 transition-colors cursor-row-resize" />
-
-            <Panel defaultSize={30} className="flex flex-col min-h-0">
-              <div className="flex bg-zinc-950 border-b border-zinc-900 px-2 shrink-0">
-                <button
-                  onClick={() => setBottomTab("terminal")}
-                  className={`px-4 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-                    bottomTab === "terminal"
-                      ? "border-blue-500 text-zinc-100"
-                      : "border-transparent text-zinc-500 hover:text-zinc-300"
-                  }`}
-                >
-                  Terminal
-                </button>
-                <button
-                  onClick={() => setBottomTab("output")}
-                  className={`px-4 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-                    bottomTab === "output"
-                      ? "border-blue-500 text-zinc-100"
-                      : "border-transparent text-zinc-500 hover:text-zinc-300"
-                  }`}
-                >
-                  Output
-                </button>
-              </div>
-              <div className="flex-1 min-h-0 bg-black overflow-hidden">
-                {bottomTab === "terminal" && <TerminalPanel />}
-                {bottomTab === "output" && (
-                  <OutputPanel output={output} isExecuting={isExecuting} />
-                )}
-              </div>
-            </Panel>
-          </PanelGroup>
-        </Panel>
-      </PanelGroup>
-    </div>
+    <WorkspaceLayout 
+      workspaceId={id}
+      showInviteModal={showInviteModal}
+      setShowInviteModal={setShowInviteModal}
+      onlineUsers={onlineUsers}
+      isSaving={saving}
+      bottomTab={bottomTab}
+      setBottomTab={setBottomTab}
+      name={name}
+      setName={setName}
+      createItem={createItem}
+      files={files}
+      activeFile={activeFile}
+      handleCodeChange={handleCodeChange}
+      saveFile={saveFile}
+      runCode={runCode}
+      openFiles={openFiles}
+      activeFileId={activeFileId}
+      openFile={openFile}
+      closeTab={closeTab}
+      cursors={cursors}
+      handleCursorChange={handleCursorChange}
+      output={output}
+      isExecuting={isExecuting}
+      renameItem={renameItem}
+      deleteItem={deleteItem}
+      duplicateItem={duplicateItem}
+      moveItem={moveItem}
+    />
   );
 }
 

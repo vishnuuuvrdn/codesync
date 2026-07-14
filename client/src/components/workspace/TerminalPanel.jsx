@@ -9,7 +9,7 @@ function generateSessionId() {
   return `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export default function TerminalPanel() {
+export default function TerminalPanel({ isVisible }) {
   const [sessions, setSessions] = useState(() => {
     const id = generateSessionId();
     return [{ id, name: "bash 1" }];
@@ -42,14 +42,14 @@ export default function TerminalPanel() {
   return (
     <div className="h-full flex flex-col bg-black">
       {/* Session tab bar */}
-      <div className="h-8 shrink-0 flex items-center bg-zinc-950 border-b border-zinc-900 overflow-x-auto no-scrollbar">
+      <div className="h-8 shrink-0 flex items-center bg-black overflow-x-auto no-scrollbar">
         {sessions.map((s) => (
           <div
             key={s.id}
             onClick={() => setActiveSessionId(s.id)}
-            className={`group flex items-center gap-1.5 px-3 h-full cursor-pointer border-r border-zinc-900 text-xs transition-colors min-w-[90px] shrink-0
-              ${activeSessionId === s.id ? "bg-zinc-900 text-zinc-200" : "text-zinc-600 hover:bg-zinc-900/50 hover:text-zinc-400"}
-            `}
+            className={`group flex items-center gap-1.5 px-3 h-full cursor-pointer text-xs transition-colors min-w-[90px] shrink-0 border-r border-zinc-900 ${
+              activeSessionId === s.id ? "bg-zinc-900 text-white" : "bg-black text-zinc-500 hover:bg-zinc-900/50 hover:text-zinc-300"
+            }`}
           >
             <span className="text-[10px] text-green-500">$</span>
             <span className="truncate flex-1">{s.name}</span>
@@ -70,7 +70,7 @@ export default function TerminalPanel() {
         ))}
         <button
           onClick={addSession}
-          className="p-1.5 mx-1 text-zinc-600 hover:text-zinc-300 rounded hover:bg-zinc-800 transition-colors shrink-0"
+          className="p-1.5 mx-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-700/50 transition-colors shrink-0"
           title="New terminal"
         >
           <Plus size={13} />
@@ -84,6 +84,7 @@ export default function TerminalPanel() {
             key={s.id}
             sessionId={s.id}
             isActive={activeSessionId === s.id}
+            isVisible={isVisible}
           />
         ))}
       </div>
@@ -91,7 +92,7 @@ export default function TerminalPanel() {
   );
 }
 
-function TerminalInstance({ sessionId, isActive }) {
+function TerminalInstance({ sessionId, isActive, isVisible }) {
   const containerRef = useRef(null);
   const xtermRef = useRef(null);
   const fitAddonRef = useRef(null);
@@ -197,9 +198,9 @@ function TerminalInstance({ sessionId, isActive }) {
     };
   }, [sessionId]);
 
-  // Re-fit when tab becomes active
+  // Re-fit when tab becomes active or terminal panel becomes visible
   useEffect(() => {
-    if (isActive && fitAddonRef.current) {
+    if (isActive && isVisible && fitAddonRef.current) {
       const t = setTimeout(() => {
         try {
           fitAddonRef.current?.fit();
@@ -207,7 +208,7 @@ function TerminalInstance({ sessionId, isActive }) {
       }, 50);
       return () => clearTimeout(t);
     }
-  }, [isActive]);
+  }, [isActive, isVisible]);
 
   return (
     <div

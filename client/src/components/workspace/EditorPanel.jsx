@@ -67,8 +67,13 @@ function EditorPanel({
     setEditorInstance(editor);
     decorationsCollectionRef.current = editor.createDecorationsCollection();
 
-    editor.onDidChangeCursorPosition((e) => {
-      if (onCursorChange) onCursorChange(e.position);
+    editor.onDidChangeCursorSelection((e) => {
+      if (onCursorChange) {
+        onCursorChange({
+          position: e.selection.getPosition(),
+          selection: e.selection,
+        });
+      }
     });
 
     // Keybindings — use refs to avoid stale closures
@@ -118,80 +123,133 @@ function EditorPanel({
 
     const decorations = Object.values(cursors)
       .filter((c) => c.fileId === activeFileId)
-      .map((c) => ({
-        range: new monaco.Range(
-          c.position.lineNumber,
-          c.position.column,
-          c.position.lineNumber,
-          c.position.column
-        ),
-        options: {
-          className: "remote-cursor",
-          hoverMessage: { value: c.user.username },
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-        },
-      }));
+      .flatMap((c) => {
+        let hash = 0;
+        for (let i = 0; i < c.user.id.length; i++) hash = (hash << 5) - hash + c.user.id.charCodeAt(i);
+        const colorIndex = Math.abs(hash) % 7;
+        
+        const isSelection = c.selection && 
+          (c.selection.startLineNumber !== c.selection.endLineNumber || 
+           c.selection.startColumn !== c.selection.endColumn);
+           
+        const result = [];
+        
+        if (isSelection) {
+          result.push({
+            range: new monaco.Range(
+              c.selection.startLineNumber,
+              c.selection.startColumn,
+              c.selection.endLineNumber,
+              c.selection.endColumn
+            ),
+            options: {
+              className: `remote-selection-${colorIndex}`,
+            }
+          });
+        }
+        
+        result.push({
+          range: new monaco.Range(
+            c.position.lineNumber,
+            c.position.column,
+            c.position.lineNumber,
+            c.position.column
+          ),
+          options: {
+            className: `remote-cursor remote-cursor-${colorIndex}`,
+            hoverMessage: { value: c.user.username },
+            stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+            before: {
+              content: '\u200B',
+              inlineClassName: `remote-cursor-label remote-cursor-label-${colorIndex}`,
+              inlineClassNameAffectsLetterSpacing: true,
+            }
+          },
+        });
+        
+        return result;
+      });
 
     decorationsCollectionRef.current.set(decorations);
   }, [cursors, activeFileId, editorInstance, monaco]);
 
   if (openFiles.length === 0 || !activeFile) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-3 select-none">
-        <svg width="40" height="40" viewBox="0 0 16 16" fill="none" className="text-zinc-800">
-          <path d="M4 2h5.5L12 4.5V14H4V2z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
-          <path d="M9 2v3h3" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
-        </svg>
-        <div className="text-center">
-          <p className="text-zinc-600 text-sm">Open a file to start editing</p>
-          <p className="text-zinc-700 text-xs mt-1">Right-click a file in the explorer</p>
+      <div className="h-full flex flex-col items-center justify-center select-none bg-black">
+        <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-10 max-w-md w-full flex flex-col items-center shadow-xl">
+          <svg width="48" height="48" viewBox="0 0 22 22" fill="none" className="mb-6">
+            <rect width="22" height="22" rx="5" fill="white" />
+            <path d="M6 8l5-3 5 3-5 3-5-3z" fill="black" opacity="0.9" />
+            <path d="M16 8v5l-5 3V11l5-3z" fill="black" opacity="0.4" />
+            <path d="M6 8v5l5 3V11L6 8z" fill="black" opacity="0.65" />
+          </svg>
+          <h2 className="text-xl text-white font-semibold tracking-tight mb-2">Welcome to CodeSync</h2>
+          <p className="text-zinc-400 text-sm mb-8 text-center">Your modern, collaborative developer workspace.</p>
+          <div className="flex w-full gap-3">
+            <button className="flex-1 bg-white hover:bg-zinc-100 text-black text-sm font-medium rounded-lg py-2 transition-colors pointer-events-none">
+              Create File
+            </button>
+            <button className="flex-1 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white text-sm font-medium rounded-lg py-2 transition-colors pointer-events-none">
+              Create Folder
+            </button>
+          </div>
+          <div className="w-full mt-3">
+            <button className="w-full bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white text-sm font-medium rounded-lg py-2 transition-colors pointer-events-none">
+              Invite Collaborator
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 bg-black">
       {/* Tab bar */}
-      <div className="h-9 shrink-0 flex items-center justify-between border-b border-zinc-900 bg-zinc-950">
-        <div className="flex items-center h-full overflow-x-auto min-w-0 no-scrollbar">
-          {openFiles.map((file) => (
-            <div
-              key={file._id}
-              onClick={() => onTabClick(file._id)}
-              className={`group flex items-center gap-1.5 px-3 py-1.5 h-full cursor-pointer border-r border-zinc-900 transition-colors min-w-[100px] max-w-[180px] shrink-0
-                ${activeFileId === file._id ? "bg-zinc-900 text-zinc-200" : "hover:bg-zinc-900/50 text-zinc-500"}
-              `}
-            >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 16 16"
-                fill="none"
-                className={`shrink-0 ${activeFileId === file._id ? "text-zinc-400" : "text-zinc-600"}`}
-              >
-                <path d="M4 2h5.5L12 4.5V14H4V2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-                <path d="M9 2v3h3" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-              </svg>
-              <span className="truncate text-xs flex-1">{file.name}</span>
-              {file.isDirty && (
-                <span className="text-blue-400 text-[10px] shrink-0">●</span>
-              )}
+      <div className="h-10 shrink-0 flex items-center justify-between bg-black border-b border-zinc-900 px-4">
+        <div className="flex items-center h-full overflow-x-auto min-w-0 no-scrollbar gap-2">
+          {openFiles.map((file) => {
+            const isActive = activeFileId === file._id;
+            return (
               <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseTab(file._id);
-                }}
-                className={`flex items-center justify-center w-4 h-4 rounded hover:bg-zinc-700 transition-colors shrink-0
-                  ${activeFileId === file._id ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60 hover:!opacity-100"}
+                key={file._id}
+                onClick={() => onTabClick(file._id)}
+                className={`group flex items-center gap-2 h-full cursor-pointer transition-colors min-w-[80px] max-w-[200px] shrink-0 relative
+                  ${isActive ? "text-white" : "text-zinc-500 hover:text-zinc-300"}
                 `}
               >
-                <svg width="9" height="9" viewBox="0 0 16 16" fill="none" className="text-zinc-400">
-                  <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                {isActive && <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white" />}
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  className={`shrink-0 ${isActive ? "text-zinc-300" : "text-zinc-500"}`}
+                >
+                  <path d="M4 2h5.5L12 4.5V14H4V2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                  <path d="M9 2v3h3" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
                 </svg>
+                <span className={`truncate text-[12px] font-medium flex-1 ${isActive ? "text-white" : "text-zinc-500 group-hover:text-zinc-300"}`}>{file.name}</span>
+                {file.isDirty ? (
+                  <span className="text-white text-[16px] shrink-0 w-4 h-4 flex items-center justify-center">●</span>
+                ) : (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab(file._id);
+                    }}
+                    className={`flex items-center justify-center w-4 h-4 rounded hover:bg-zinc-800 transition-colors shrink-0
+                      ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
+                    `}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" className="text-zinc-400">
+                      <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex items-center gap-3 px-4 shrink-0">
@@ -206,35 +264,30 @@ function EditorPanel({
           <button
             onClick={onRun}
             disabled={isExecuting}
-            className="px-3 py-1 rounded bg-green-700 hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium transition cursor-pointer text-white"
+            className="px-3 py-1.5 rounded-md bg-white hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold transition-colors cursor-pointer text-black shadow-sm flex items-center gap-1.5"
           >
-            {isExecuting ? "Running…" : "▶ Run"}
+            {isExecuting ? (
+              <span className="flex items-center gap-1.5">
+                <svg className="animate-spin h-3 w-3 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Running
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M4 2.5L13.5 8L4 13.5V2.5Z" />
+                </svg>
+                Run
+              </span>
+            )}
           </button>
         </div>
       </div>
 
-      {/* Breadcrumb */}
-      <div className="h-6 flex items-center px-4 bg-[#1e1e1e] border-b border-zinc-900 text-[11px] text-zinc-500 shrink-0 overflow-hidden">
-        {(() => {
-          const breadcrumbs = [];
-          let current = files.find((f) => f._id === activeFile._id) || activeFile;
-          while (current) {
-            breadcrumbs.unshift(current.name);
-            current = files.find((f) => f._id === current.parent);
-          }
-          return breadcrumbs.map((crumb, i) => (
-            <span key={i} className="flex items-center gap-1 min-w-0">
-              {i > 0 && <span className="text-zinc-700 mx-0.5">›</span>}
-              <span className={`truncate ${i === breadcrumbs.length - 1 ? "text-zinc-300" : "text-zinc-600"}`}>
-                {crumb}
-              </span>
-            </span>
-          ));
-        })()}
-      </div>
-
-      {/* Editor */}
-      <div className="flex-1 min-h-0">
+      {/* Editor Container */}
+      <div className="flex-1 relative min-h-0 bg-black">
         <Editor
           height="100%"
           path={activeFile._id}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { DndContext, useDraggable, useDroppable, closestCenter } from "@dnd-kit/core";
+import { DndContext, useDraggable, useDroppable, closestCenter, useSensor, useSensors, PointerSensor } from "@dnd-kit/core";
 import { File, Folder, FolderOpen, Search, ChevronsUpDown, ChevronsDownUp } from "lucide-react";
 import { useWorkspaceSession } from "../../contexts/WorkspaceSessionContext";
 
@@ -88,12 +88,12 @@ const FileNode = ({
         {...listeners}
         onClick={handleClick}
         onContextMenu={handleRightClick}
-        className={`flex items-center gap-1.5 py-1 text-xs cursor-pointer transition-colors select-none
+        className={`group flex items-center gap-1.5 py-1.5 text-sm cursor-pointer transition-colors select-none min-w-0 rounded-md mx-2
           ${isActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"}
           ${isDragging ? "opacity-50" : "opacity-100"}
-          ${isOver ? "bg-zinc-700 outline outline-1 outline-accent" : ""}
+          ${isOver ? "bg-zinc-800 outline outline-1 outline-zinc-500" : ""}
         `}
-        style={{ paddingLeft: `${0.5 + depth * 0.8}rem`, paddingRight: '0.5rem' }}
+        style={{ paddingLeft: `${0.25 + depth * 1.25}rem`, paddingRight: '0.5rem' }}
       >
         <div 
           onClick={isFolder ? handleToggle : undefined} 
@@ -130,15 +130,18 @@ const FileNode = ({
             onBlur={submitRename}
             onKeyDown={handleKeyDown}
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-900 border border-zinc-700 text-white text-xs rounded px-1 outline-none w-full"
+            className="bg-zinc-900 border border-zinc-700 text-white text-xs rounded px-1 outline-none w-full min-w-0"
           />
         ) : (
-          <span className="truncate">{node.name}</span>
+          <span className="truncate flex-1 min-w-0">{node.name}</span>
         )}
       </div>
       
-      {isFolder && isExpanded && node.children && (
-        <div>
+      <div 
+        className={`overflow-hidden transition-all duration-200 ease-in-out ${isExpanded ? "max-h-full opacity-100" : "max-h-0 opacity-0"}`}
+      >
+        {isFolder && isExpanded && node.children && (
+          <div>
           {node.children.map((child) => (
             <FileNode
               key={child._id}
@@ -154,6 +157,7 @@ const FileNode = ({
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 };
@@ -165,16 +169,16 @@ export default function FileTree({
   onRenameItem, 
   onDeleteItem, 
   onDuplicateItem, 
-  onMoveItem 
+  onMoveItem,
+  searchQuery = ""
 }) {
   const [contextMenu, setContextMenu] = useState(null);
   const [renamingNodeId, setRenamingNodeId] = useState(null);
-  const [search, setSearch] = useState("");
   const { setExpandedFolders, expandedFolders, activeFileId } = useWorkspaceSession();
 
   // Auto-reveal active file
   useEffect(() => {
-    if (activeFileId) {
+    if (searchQuery.trim() === "" && activeFileId) {
       const activeNode = files.find(f => f._id === activeFileId);
       if (activeNode) {
         const parentsToExpand = {};
@@ -222,12 +226,12 @@ export default function FileTree({
     const roots = [];
 
     // Filter logic
-    const filteredFiles = search 
-      ? files.filter(f => f.name.toLowerCase().includes(search.toLowerCase()))
+    const filteredFiles = searchQuery 
+      ? files.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
       : files;
 
     // If searching, show as flat list or resolve parents. For simplicity, if searching, just flat list matching nodes (if we want them in tree, we have to include parents)
-    if (search) {
+    if (searchQuery) {
       // Just return sorted flat list of matches for search
       return filteredFiles.sort((a, b) => a.name.localeCompare(b.name)).map(f => ({...f, children: []}));
     }
@@ -257,13 +261,21 @@ export default function FileTree({
 
     sortNodes(roots);
     return roots;
-  }, [files, search]);
+  }, [files, searchQuery]);
 
   const expandAll = () => {
     const allFolders = {};
     files.filter(f => f.type === "folder").forEach(f => allFolders[f._id] = true);
     setExpandedFolders(allFolders);
   };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    })
+  );
 
   const collapseAll = () => {
     setExpandedFolders({});
@@ -288,29 +300,19 @@ export default function FileTree({
   });
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-3 py-2 flex gap-2 shrink-0 border-b border-zinc-900 items-center justify-between">
-        <div className="relative flex-1">
-          <Search size={12} className="absolute left-2 top-1.5 text-zinc-500" />
-          <input 
-            type="text" 
-            placeholder="Search files..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-zinc-900 text-white text-xs rounded pl-6 pr-2 py-1 outline-none border border-zinc-800 focus:border-zinc-700"
-          />
-        </div>
-        <div className="flex gap-1">
-          <button onClick={expandAll} className="p-1 text-zinc-500 hover:text-white rounded hover:bg-zinc-800" title="Expand All">
-            <ChevronsUpDown size={14} />
+    <div className="flex flex-col h-full overflow-hidden min-w-0">
+      <div className="flex justify-end px-5 py-1">
+        <div className="flex gap-2 opacity-0 hover:opacity-100 group-hover:opacity-100 transition-opacity">
+          <button onClick={expandAll} className="text-zinc-500 hover:text-white" title="Expand All">
+            <ChevronsUpDown size={12} />
           </button>
-          <button onClick={collapseAll} className="p-1 text-zinc-500 hover:text-white rounded hover:bg-zinc-800" title="Collapse All">
-            <ChevronsDownUp size={14} />
+          <button onClick={collapseAll} className="text-zinc-500 hover:text-white" title="Collapse All">
+            <ChevronsDownUp size={12} />
           </button>
         </div>
       </div>
 
-      <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <div 
           ref={setRootDroppable}
           className={`flex-1 overflow-y-auto py-2 relative custom-scrollbar ${isRootOver ? "bg-zinc-900/50" : ""}`}

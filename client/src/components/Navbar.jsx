@@ -18,7 +18,7 @@ function Navbar() {
   };
 
   return (
-    <div className="h-10 shrink-0 flex items-center justify-between px-5 border-b border-zinc-900 bg-zinc-950">
+    <div className="h-12 shrink-0 flex items-center justify-between px-4 border-b border-zinc-900 bg-[#18181b] select-none">
       <button
         onClick={() => navigate("/dashboard")}
         className="flex items-center gap-2 cursor-pointer"
@@ -33,14 +33,19 @@ function Navbar() {
       </button>
 
       <div className="flex items-center gap-4">
-        {isWorkspace && currentUser && (
-          <span className="text-zinc-700 text-xs">{currentUser.username}</span>
+        {currentUser && (
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white">
+              {currentUser.username.charAt(0).toUpperCase()}
+            </div>
+            <span className="text-zinc-400 text-xs hidden sm:block">{currentUser.username}</span>
+          </div>
         )}
         <button
           onClick={handleLogout}
-          className="text-zinc-600 hover:text-white text-xs transition-colors cursor-pointer"
+          className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors cursor-pointer"
         >
-          Sign out
+          Logout
         </button>
       </div>
     </div>

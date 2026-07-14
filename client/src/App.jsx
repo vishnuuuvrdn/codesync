@@ -47,12 +47,12 @@ function PublicRoute({ children }) {
 
 function Layout() {
   const location = useLocation();
-  const hideNav = ["/login", "/register"].includes(location.pathname);
+  const hideNav = ["/login", "/register"].includes(location.pathname) || location.pathname.startsWith("/workspace");
 
   return (
     <div className="flex flex-col h-screen bg-black text-white">
       {!hideNav && <Navbar />}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden flex flex-col relative">
         <Routes>
           <Route
             path="/login"

@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import workspaceRoutes from "./routes/workspace.route.js";
 import fileRoutes from "./routes/file.route.js";
 import runRoutes from "./routes/run.route.js";
+import inviteRoutes from "./routes/invite.route.js";
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/files", fileRoutes);
 app.use("/api/run", runRoutes);
+app.use("/api/invites", inviteRoutes);
 
 app.get("/", (req, res) => {
   res.json({ message: "CodeSync API", version: "1.0.0", status: "ok" });

@@ -21,10 +21,13 @@ const initializeSocket = (io) => {
       );
 
       if (!alreadyExists) {
-        workspaceUsers[workspaceId].push(user);
+        workspaceUsers[workspaceId].push({ ...user, status: "online" });
+      } else {
+        alreadyExists.status = "online";
       }
 
       io.to(workspaceId).emit("online-users", workspaceUsers[workspaceId]);
+      socket.to(workspaceId).emit("peer-joined", { user });
 
       console.log(`${user.username} joined ${workspaceId}`);
     });
@@ -43,6 +46,16 @@ const initializeSocket = (io) => {
 
     socket.on("file-update", ({ workspaceId, fileId, content }) => {
       socket.to(workspaceId).emit("file-updated", { fileId, content });
+    });
+
+    socket.on("presence-update", ({ workspaceId, status }) => {
+      if (workspaceUsers[workspaceId] && socket.user) {
+        const u = workspaceUsers[workspaceId].find((user) => user.id === socket.user.id);
+        if (u) {
+          u.status = status;
+          io.to(workspaceId).emit("online-users", workspaceUsers[workspaceId]);
+        }
+      }
     });
 
     socket.on("cursor-move", ({ workspaceId, fileId, position, user }) => {

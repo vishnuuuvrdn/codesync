@@ -8,13 +8,10 @@ function OutputPanel({ output, isExecuting }) {
       output.includes("fatal:"));
 
   return (
-    <div className="h-full flex flex-col bg-zinc-950">
-      <div className="h-8 px-4 border-b border-zinc-900 flex items-center justify-between shrink-0">
-        <span className="text-xs text-zinc-400 font-medium">Output</span>
-        {isExecuting && (
-          <span className="text-yellow-400 text-xs animate-pulse">Running…</span>
-        )}
-      </div>
+    <div className="h-full flex flex-col bg-black relative">
+      {isExecuting && (
+        <div className="absolute top-2 right-4 text-yellow-400 text-xs animate-pulse">Running…</div>
+      )}
 
       <div className="flex-1 overflow-auto p-4 font-mono text-xs min-h-0">
         {!output ? (
@@ -22,7 +19,7 @@ function OutputPanel({ output, isExecuting }) {
         ) : (
           <pre
             className={`whitespace-pre-wrap break-words leading-relaxed ${
-              hasError ? "text-red-400" : "text-green-400"
+              hasError ? "text-[#f14c4c]" : "text-[#d4d4d4]"
             }`}
           >
             {output}

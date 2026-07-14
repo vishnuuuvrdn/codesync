@@ -1,12 +1,14 @@
 import { useState } from "react";
 import api from "../api/axios";
 import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 function Login() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { setCurrentUser } = useAuth();
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -18,7 +20,8 @@ function Login() {
     setLoading(true);
     setError("");
     try {
-      await api.post("/auth/login", form);
+      const res = await api.post("/auth/login", form);
+      setCurrentUser(res.data.user);
       navigate("/dashboard");
     } catch (err) {
       const msg =
