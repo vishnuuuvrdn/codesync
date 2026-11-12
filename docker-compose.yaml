@@ -1,0 +1,36 @@
+name: codesync
+
+services:
+  web:
+    build:
+      context: ./client
+    depends_on:
+      - api
+    ports:
+      - "5173:5173"
+    develop:
+      watch:
+        - action: sync
+          path: ./client
+          target: /codesync/web
+          ignore:
+            - node_modules/
+            - package.json
+        - action: rebuild
+          path: ./client/package.json
+
+  api:
+    build:
+      context: ./server
+    ports:
+      - "5000:5000"
+    develop:
+      watch:
+        - action: sync
+          path: ./server
+          target: /codesync/api
+          ignore:
+            - node_modules/
+            - package.json
+        - action: rebuild
+          path: ./server/package.json
